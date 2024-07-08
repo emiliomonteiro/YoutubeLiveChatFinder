@@ -1,5 +1,6 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+import pytchat
 import time
 import tkinter as tk
 from tkinter import simpledialog, ttk
@@ -8,11 +9,13 @@ import threading
 # Variáveis globais
 driver = None
 continue_running = True
-youtube_live_url = ""
+youtube_live_url = "https://www.youtube.com/watch?v=bS31P1JA0dY"
+chat = None
 
 def update_status(message):
     status_label.config(text=message)
     status_label.update_idletasks()
+    print(message)  # Adiciona um log para debug
 
 def start_automation():
     global driver
@@ -32,8 +35,8 @@ def start_automation():
 
     # Pedir o URL da live no YouTube
     youtube_live_url = simpledialog.askstring("URL da Live no YouTube", "Digite o URL da live no YouTube:")
-    if not youtube_live_url:
-        update_status("Por favor, digite o URL da live no YouTube.")
+    if not youtube_live_url or "youtube.com" not in youtube_live_url:
+        update_status("Por favor, digite um URL válido do YouTube.")
         return
 
     # Iniciar thread para automação
@@ -42,6 +45,7 @@ def start_automation():
 
 def automation_thread(username):
     global driver
+    global chat
     global continue_running
 
     try:
@@ -54,70 +58,85 @@ def automation_thread(username):
         update_status("Esperando o chat carregar...")
         time.sleep(10)
 
-        while continue_running:
-            update_status("Buscando mensagens com a classe 'author-name.owner.yt-live-chat-author-chip'...")
-            messages = driver.find_elements(By.CSS_SELECTOR, "yt-live-chat-text-message-renderer")
-            link_found = False
-            for message in messages:
-                author_elements = message.find_elements(By.CSS_SELECTOR, ".author-name.owner.yt-live-chat-author-chip")
-                if author_elements:
-                    try:
-                        link_element = message.find_element(By.CSS_SELECTOR, "a")
-                        link = link_element.get_attribute("href")
-                        if link.startswith("https://forms.gle/"):
-                            update_status("Abrindo o link do formulário em uma nova aba...")
-                            driver.execute_script(f"window.open('{link}', '_blank');")
-                            driver.switch_to.window(driver.window_handles[-1])
+        video_id = youtube_live_url.split('v=')[-1]
+        chat = pytchat.create(video_id=video_id)
 
-                            update_status("Esperando o formulário carregar...")
-                            time.sleep(5)
+        if not chat.is_alive():
+            update_status("Falha ao conectar com o chat ao vivo.")
+            return
 
-                            update_status("Preenchendo o formulário...")
-                            form_field = driver.find_element(By.XPATH, "//input[@type='text']")
-                            form_field.send_keys(username)
-
-                            update_status("Enviando o formulário...")
-                            submit_button = driver.find_element(By.XPATH, "//span[text()='Enviar']")
-                            submit_button.click()
-
-                            update_status("Formulário preenchido com sucesso!")
-                            link_found = True
-                            break
-                        else:
-                            update_status("Link válido de formulário não encontrado no chat. Abrindo o formulário de teste.")
-                            open_test_form(driver, username)
-                            link_found = True
-                            break
-                    except Exception as e:
-                        update_status(f"Erro ao processar mensagem: {e}")
-
-            if not link_found:
-                update_status("Nenhum link válido de formulário encontrado. Tentando novamente em 2 segundos...")
-                time.sleep(2)
+        # Iniciar uma thread separada para monitorar o chat
+        threading.Thread(target=monitor_chat, args=(username,), daemon=True).start()
 
     except Exception as e:
         update_status(f"Erro na automação: {e}")
 
     update_status("Automação encerrada.")
 
+def monitor_chat(username):
+    global chat
+    global continue_running
+
+    while continue_running:
+        try:
+            for c in chat.get().sync_items():
+                author_type = c.author.type  # owner, moderator, member, etc.
+                if author_type == "owner":
+                    update_status(f"Mensagem de {c.author.name}: {c.message}")
+                    if "forms.gle" in c.message:
+                        update_status("Abrindo o link do formulário em uma nova aba...")
+                        link = c.message.split(' ')[-1]  # Supondo que o link seja a última parte da mensagem
+                        open_form(driver, link, username)
+                    else:
+                        update_status("Abrindo o formulário de teste.")
+                        open_test_form(driver, username)
+            time.sleep(2)
+        except Exception as e:
+            update_status(f"Erro ao monitorar o chat: {e}")
+
+def open_form(driver, link, username):
+    try:
+        driver.execute_script(f"window.open('{link}', '_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
+
+        update_status("Esperando o formulário carregar...")
+        time.sleep(5)
+
+        update_status("Preenchendo o formulário...")
+        form_field = driver.find_element(By.XPATH, "//input[@type='text']")
+        form_field.send_keys(username)
+
+        update_status("Enviando o formulário...")
+        submit_button = driver.find_element(By.XPATH, "//span[text()='Enviar']")
+        submit_button.click()
+
+        update_status("Formulário preenchido com sucesso!")
+
+    except Exception as e:
+        update_status(f"Erro ao abrir o formulário: {e}")
+
 def open_test_form(driver, username):
-    update_status("Abrindo formulário de teste em uma nova aba...")
-    test_form_url = "https://forms.gle/NQHW5SXKNwX4V4iRA"
-    driver.execute_script(f"window.open('{test_form_url}', '_blank');")
-    driver.switch_to.window(driver.window_handles[-1])
+    try:
+        update_status("Abrindo formulário de teste em uma nova aba...")
+        test_form_url = "https://forms.gle/NQHW5SXKNwX4V4iRA"
+        driver.execute_script(f"window.open('{test_form_url}', '_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
 
-    update_status("Esperando o formulário de teste carregar...")
-    time.sleep(5)
+        update_status("Esperando o formulário de teste carregar...")
+        time.sleep(5)
 
-    update_status("Preenchendo o formulário de teste...")
-    form_field = driver.find_element(By.XPATH, "//input[@type='text']")
-    form_field.send_keys(username)
+        update_status("Preenchendo o formulário de teste...")
+        form_field = driver.find_element(By.XPATH, "//input[@type='text']")
+        form_field.send_keys(username)
 
-    update_status("Enviando o formulário de teste...")
-    submit_button = driver.find_element(By.XPATH, "//span[text()='Enviar']")
-    submit_button.click()
+        update_status("Enviando o formulário de teste...")
+        submit_button = driver.find_element(By.XPATH, "//span[text()='Enviar']")
+        submit_button.click()
 
-    update_status("Formulário de teste preenchido com sucesso!")
+        update_status("Formulário de teste preenchido com sucesso!")
+
+    except Exception as e:
+        update_status(f"Erro ao abrir o formulário de teste: {e}")
 
 def close_application():
     global continue_running
