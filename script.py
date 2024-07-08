@@ -2,12 +2,13 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 import time
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 import threading
 
 # Variáveis globais
 driver = None
 continue_running = True
+youtube_live_url = ""
 
 def update_status(message):
     status_label.config(text=message)
@@ -16,6 +17,7 @@ def update_status(message):
 def start_automation():
     global driver
     global continue_running
+    global youtube_live_url
 
     # Verificar se a automação já está em execução
     if driver:
@@ -26,6 +28,12 @@ def start_automation():
     username = username_entry.get()
     if not username:
         update_status("Por favor, digite o nome de usuário.")
+        return
+
+    # Pedir o URL da live no YouTube
+    youtube_live_url = simpledialog.askstring("URL da Live no YouTube", "Digite o URL da live no YouTube:")
+    if not youtube_live_url:
+        update_status("Por favor, digite o URL da live no YouTube.")
         return
 
     # Iniciar thread para automação
@@ -41,20 +49,18 @@ def automation_thread(username):
             driver = webdriver.Chrome()
 
         update_status("Acessando a live no YouTube...")
-        youtube_live_url = "https://www.youtube.com/live/bS31P1JA0dY"
         driver.get(youtube_live_url)
 
         update_status("Esperando o chat carregar...")
         time.sleep(10)
 
         while continue_running:
-            update_status("Buscando mensagens do perfil 'Canal F12'...")
+            update_status("Buscando mensagens com a classe 'author-name.owner.yt-live-chat-author-chip'...")
             messages = driver.find_elements(By.CSS_SELECTOR, "yt-live-chat-text-message-renderer")
             link_found = False
             for message in messages:
-                author_element = message.find_element(By.CSS_SELECTOR, ".author-name.owner.yt-live-chat-author-chip")
-                author_name = author_element.text.strip()
-                if author_name == "Canal F12":
+                author_elements = message.find_elements(By.CSS_SELECTOR, ".author-name.owner.yt-live-chat-author-chip")
+                if author_elements:
                     try:
                         link_element = message.find_element(By.CSS_SELECTOR, "a")
                         link = link_element.get_attribute("href")
@@ -78,8 +84,7 @@ def automation_thread(username):
                             link_found = True
                             break
                         else:
-                            update_status("Link válido de formulário não encontrado no chat do perfil 'Canal F12'.")
-                            # Abrir o formulário de teste
+                            update_status("Link válido de formulário não encontrado no chat. Abrindo o formulário de teste.")
                             open_test_form(driver, username)
                             link_found = True
                             break
